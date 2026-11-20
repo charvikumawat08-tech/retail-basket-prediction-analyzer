@@ -14,7 +14,7 @@ This project provides a tool for retail analysts to compare the effectiveness of
 
 Tick these off as you go, and commit after each one.
 
-- [ ] **1. Generate a synthetic dataset of shopping baskets with planted itemsets.**  
+- [x] **1. Generate a synthetic dataset of shopping baskets with planted itemsets.**
       Hint: Use the data generation techniques from 'Teach a Language Model What Sells Together' to create your dataset.
 - [ ] **2. Implement the n-gram model to predict next items in a basket.**  
       Hint: Apply the n-gram model building technique from 'Build a Next-Word Predictor from Scratch' to your basket sequences.
