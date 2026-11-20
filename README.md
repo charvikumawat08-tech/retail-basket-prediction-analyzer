@@ -18,7 +18,7 @@ Tick these off as you go, and commit after each one.
       Hint: Use the data generation techniques from 'Teach a Language Model What Sells Together' to create your dataset.
 - [x] **2. Implement the n-gram model to predict next items in a basket.**
       Hint: Apply the n-gram model building technique from 'Build a Next-Word Predictor from Scratch' to your basket sequences.
-- [ ] **3. Pretrain a small language model (like in the drill) on the basket sequences.**  
+- [x] **3. Pretrain a small language model (like in the drill) on the basket sequences.**
       Hint: Adapt the language model training process from 'Teach a Language Model What Sells Together' for your basket data.
 - [ ] **4. Evaluate both models using next-item prediction metrics (e.g., accuracy, rank).**  
       Hint: Implement evaluation metrics similar to those discussed in 'Build a Next-Word Predictor from Scratch' for next-item prediction.

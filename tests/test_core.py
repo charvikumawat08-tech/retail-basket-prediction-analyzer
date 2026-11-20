@@ -91,9 +91,38 @@ def test_milestone_2(tmp_path):
 
 
 # Milestone 3: Pretrain a small language model (like in the drill) on the basket sequences.
-@pytest.mark.skip(reason="remove this line when you start milestone 3")
-def test_milestone_3():
-    raise NotImplementedError("write the test for milestone 3")
+def test_milestone_3(tmp_path):
+    from app.core import SmallBasketLM, milestone_1, milestone_3
+    from app.storage import Store
+
+    store = Store(str(tmp_path / "app.json"))
+    dataset = milestone_1(num_baskets=1000, seed=23, store=store)
+    summary = milestone_3(store=store)
+
+    assert summary["final_loss"] < summary["initial_loss"]
+    assert summary["epochs"] == 25
+    assert summary["vocab_size"] == len(dataset["vocab"])
+    serialized_model = store.get("small_lm_model")
+    assert serialized_model is not None
+
+    model = SmallBasketLM.from_dict(serialized_model)
+    prefix = ["<BOS>", "pasta", "marinara_sauce"]
+    probabilities = model.predict_proba(prefix)
+    assert set(probabilities) == set(dataset["vocab"]) - {"<PAD>", "<BOS>"}
+    assert all(probability >= 0 for probability in probabilities.values())
+    assert sum(probabilities.values()) == pytest.approx(1.0)
+    ranked_items = sorted(probabilities, key=probabilities.get, reverse=True)
+    assert "parmesan" in ranked_items[:2]
+    assert summary["sample_prediction"]["item"] == "parmesan"
+
+    restored_model = SmallBasketLM.from_dict(model.to_dict())
+    assert restored_model.predict_proba(prefix) == probabilities
+
+    empty_store = Store(str(tmp_path / "generated.json"))
+    generated_summary = milestone_3(store=empty_store, epochs=2)
+    assert empty_store.get("dataset") is not None
+    assert empty_store.get("small_lm_model") is not None
+    assert generated_summary["vocab_size"] == len(empty_store.get("dataset")["vocab"])
 
 
 # Milestone 4: Evaluate both models using next-item prediction metrics (e.g., accuracy, rank).

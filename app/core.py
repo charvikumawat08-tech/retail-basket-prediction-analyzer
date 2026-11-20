@@ -7,6 +7,228 @@ import numpy as np
 from app.storage import Store
 
 
+class SmallBasketLM:
+    _IGNORED_TARGETS = {"<PAD>", "<BOS>"}
+    _REQUIRED_SPECIAL_TOKENS = {"<PAD>", "<BOS>", "<EOS>"}
+    _ADAM_BETA1 = 0.9
+    _ADAM_BETA2 = 0.999
+    _ADAM_EPSILON = 1e-8
+    _BATCH_SIZE = 128
+
+    def __init__(
+        self,
+        vocab: list[str],
+        embed_dim: int = 24,
+        hidden_dim: int = 48,
+        context_size: int = 3,
+        seed: int = 42,
+    ) -> None:
+        if embed_dim < 1 or hidden_dim < 1 or context_size < 1:
+            raise ValueError("model dimensions must be positive")
+        if len(set(vocab)) != len(vocab):
+            raise ValueError("vocab must not contain duplicate tokens")
+        if not self._REQUIRED_SPECIAL_TOKENS.issubset(vocab):
+            raise ValueError("vocab must include <PAD>, <BOS>, and <EOS>")
+
+        self.vocab = list(vocab)
+        self.embed_dim = embed_dim
+        self.hidden_dim = hidden_dim
+        self.context_size = context_size
+        self.seed = seed
+        self.target_items = [
+            token for token in self.vocab if token not in self._IGNORED_TARGETS
+        ]
+        self._token_to_id = {token: index for index, token in enumerate(self.vocab)}
+        self._target_to_id = {
+            token: index for index, token in enumerate(self.target_items)
+        }
+
+        rng = np.random.default_rng(seed)
+        input_dim = context_size * embed_dim
+        output_dim = len(self.target_items)
+        self.E = rng.normal(0, 0.1, size=(len(self.vocab), embed_dim))
+        self.W1 = rng.normal(
+            0, np.sqrt(2 / (input_dim + hidden_dim)), size=(input_dim, hidden_dim)
+        )
+        self.b1 = np.zeros(hidden_dim)
+        self.W2 = rng.normal(
+            0, np.sqrt(2 / (hidden_dim + output_dim)), size=(hidden_dim, output_dim)
+        )
+        self.b2 = np.zeros(output_dim)
+        self.loss_history: list[float] = []
+
+    def _contexts_from_prefix(self, prefix: list[str]) -> np.ndarray:
+        tokens = prefix[-self.context_size:]
+        for token in tokens:
+            if token not in self._token_to_id:
+                raise ValueError(f"prefix token {token!r} is not in vocab")
+        tokens = ["<PAD>"] * (self.context_size - len(tokens)) + tokens
+        return np.array(
+            [[self._token_to_id[token] for token in tokens]], dtype=np.int64
+        )
+
+    def _forward(
+        self, contexts: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        embedded = self.E[contexts].reshape(len(contexts), -1)
+        hidden = np.tanh(embedded @ self.W1 + self.b1)
+        logits = hidden @ self.W2 + self.b2
+        logits -= logits.max(axis=1, keepdims=True)
+        exponentials = np.exp(logits)
+        probabilities = exponentials / exponentials.sum(axis=1, keepdims=True)
+        return embedded, hidden, probabilities
+
+    def _cross_entropy(self, contexts: np.ndarray, targets: np.ndarray) -> float:
+        _, _, probabilities = self._forward(contexts)
+        target_probabilities = probabilities[np.arange(len(targets)), targets]
+        return float(-np.log(np.maximum(target_probabilities, 1e-12)).mean())
+
+    def fit(
+        self,
+        baskets: list[list[str]],
+        epochs: int = 25,
+        lr: float = 0.03,
+    ) -> "SmallBasketLM":
+        if epochs < 1:
+            raise ValueError("epochs must be at least 1")
+        if not np.isfinite(lr) or lr <= 0:
+            raise ValueError("lr must be greater than 0")
+
+        context_rows = []
+        target_rows = []
+        for basket in baskets:
+            for token in basket:
+                if token not in self._token_to_id:
+                    raise ValueError(f"basket token {token!r} is not in vocab")
+            for index in range(1, len(basket)):
+                target = basket[index]
+                if target in self._IGNORED_TARGETS:
+                    continue
+                context = basket[max(0, index - self.context_size):index]
+                context = ["<PAD>"] * (self.context_size - len(context)) + context
+                context_rows.append(
+                    [self._token_to_id[token] for token in context]
+                )
+                target_rows.append(self._target_to_id[target])
+
+        if not target_rows:
+            raise ValueError("training baskets contain no next-item targets")
+
+        contexts = np.asarray(context_rows, dtype=np.int64)
+        targets = np.asarray(target_rows, dtype=np.int64)
+        self.loss_history = [self._cross_entropy(contexts, targets)]
+
+        parameters = {
+            "E": self.E,
+            "W1": self.W1,
+            "b1": self.b1,
+            "W2": self.W2,
+            "b2": self.b2,
+        }
+        first_moments = {name: np.zeros_like(value) for name, value in parameters.items()}
+        second_moments = {name: np.zeros_like(value) for name, value in parameters.items()}
+        rng = np.random.default_rng(self.seed)
+        step = 0
+
+        for _ in range(epochs):
+            epoch_order = rng.permutation(len(targets))
+            for batch_start in range(0, len(epoch_order), self._BATCH_SIZE):
+                batch_indices = epoch_order[
+                    batch_start:batch_start + self._BATCH_SIZE
+                ]
+                batch_contexts = contexts[batch_indices]
+                batch_targets = targets[batch_indices]
+                embedded, hidden, probabilities = self._forward(batch_contexts)
+                gradient_logits = probabilities
+                gradient_logits[
+                    np.arange(len(batch_targets)), batch_targets
+                ] -= 1
+                gradient_logits /= len(batch_targets)
+
+                gradient_W2 = hidden.T @ gradient_logits
+                gradient_b2 = gradient_logits.sum(axis=0)
+                gradient_hidden = gradient_logits @ self.W2.T
+                gradient_hidden *= 1 - hidden**2
+                gradient_W1 = embedded.T @ gradient_hidden
+                gradient_b1 = gradient_hidden.sum(axis=0)
+                gradient_embedded = (gradient_hidden @ self.W1.T).reshape(
+                    len(batch_targets), self.context_size, self.embed_dim
+                )
+                gradient_E = np.zeros_like(self.E)
+                np.add.at(
+                    gradient_E,
+                    batch_contexts.reshape(-1),
+                    gradient_embedded.reshape(-1, self.embed_dim),
+                )
+
+                gradients = {
+                    "E": gradient_E,
+                    "W1": gradient_W1,
+                    "b1": gradient_b1,
+                    "W2": gradient_W2,
+                    "b2": gradient_b2,
+                }
+                step += 1
+                for name, gradient in gradients.items():
+                    first_moments[name] *= self._ADAM_BETA1
+                    first_moments[name] += (1 - self._ADAM_BETA1) * gradient
+                    second_moments[name] *= self._ADAM_BETA2
+                    second_moments[name] += (1 - self._ADAM_BETA2) * gradient**2
+                    corrected_first = first_moments[name] / (
+                        1 - self._ADAM_BETA1**step
+                    )
+                    corrected_second = second_moments[name] / (
+                        1 - self._ADAM_BETA2**step
+                    )
+                    parameters[name] -= lr * corrected_first / (
+                        np.sqrt(corrected_second) + self._ADAM_EPSILON
+                    )
+
+            self.loss_history.append(self._cross_entropy(contexts, targets))
+
+        return self
+
+    def predict_proba(self, prefix: list[str]) -> dict[str, float]:
+        contexts = self._contexts_from_prefix(prefix)
+        _, _, probabilities = self._forward(contexts)
+        return {
+            item: float(probabilities[0, index])
+            for index, item in enumerate(self.target_items)
+        }
+
+    def to_dict(self) -> dict:
+        return {
+            "vocab": self.vocab,
+            "embed_dim": self.embed_dim,
+            "hidden_dim": self.hidden_dim,
+            "context_size": self.context_size,
+            "seed": self.seed,
+            "E": self.E.tolist(),
+            "W1": self.W1.tolist(),
+            "b1": self.b1.tolist(),
+            "W2": self.W2.tolist(),
+            "b2": self.b2.tolist(),
+            "loss_history": self.loss_history,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SmallBasketLM":
+        model = cls(
+            vocab=data["vocab"],
+            embed_dim=data["embed_dim"],
+            hidden_dim=data["hidden_dim"],
+            context_size=data["context_size"],
+            seed=data["seed"],
+        )
+        for name in ("E", "W1", "b1", "W2", "b2"):
+            weights = np.asarray(data[name], dtype=float)
+            if weights.shape != getattr(model, name).shape:
+                raise ValueError(f"serialized {name} has an invalid shape")
+            setattr(model, name, weights)
+        model.loss_history = list(data.get("loss_history", []))
+        return model
+
+
 class NGramBasketPredictor:
     _IGNORED_TARGETS = {"<PAD>", "<BOS>"}
     _REQUIRED_SPECIAL_TOKENS = {"<PAD>", "<BOS>", "<EOS>"}
@@ -260,8 +482,56 @@ def milestone_2(smoothing: float = 0.5, store: Store | None = None) -> dict:
 
 # --- Milestone 3: Pretrain a small language model (like in the drill) on the basket sequences.
 # Hint: Adapt the language model training process from 'Teach a Language Model What Sells Together' for your basket data.
-def milestone_3():  # TODO(milestone 3)
-    raise NotImplementedError("TODO(milestone 3)")
+def milestone_3(
+    embed_dim: int = 24,
+    hidden_dim: int = 48,
+    context_size: int = 3,
+    epochs: int = 25,
+    lr: float = 0.03,
+    seed: int = 42,
+    store: Store | None = None,
+) -> dict:
+    if store is None:
+        store = Store()
+
+    dataset = store.get("dataset")
+    if dataset is None:
+        dataset = milestone_1(store=store)
+    if not isinstance(dataset, dict):
+        raise ValueError("stored dataset must be a dictionary")
+
+    vocab = dataset.get("vocab")
+    train_baskets = dataset.get("train_baskets")
+    planted_itemsets = dataset.get("planted_itemsets")
+    if not isinstance(vocab, list) or not isinstance(train_baskets, list):
+        raise ValueError("stored dataset must include vocab and train_baskets lists")
+    if not isinstance(planted_itemsets, list) or not planted_itemsets:
+        raise ValueError("stored dataset must include planted itemsets")
+
+    model = SmallBasketLM(
+        vocab,
+        embed_dim=embed_dim,
+        hidden_dim=hidden_dim,
+        context_size=context_size,
+        seed=seed,
+    ).fit(train_baskets, epochs=epochs, lr=lr)
+    store.put("small_lm_model", model.to_dict())
+
+    sample_prefix = ["<BOS>", *planted_itemsets[0][:-1]]
+    sample_probabilities = model.predict_proba(sample_prefix)
+    sample_item = max(sample_probabilities, key=lambda item: sample_probabilities[item])
+    return {
+        "initial_loss": model.loss_history[0],
+        "final_loss": model.loss_history[-1],
+        "loss_history": model.loss_history,
+        "epochs": epochs,
+        "vocab_size": len(model.vocab),
+        "sample_prediction": {
+            "prefix": sample_prefix,
+            "item": sample_item,
+            "probability": sample_probabilities[sample_item],
+        },
+    }
 
 
 # --- Milestone 4: Evaluate both models using next-item prediction metrics (e.g., accuracy, rank).

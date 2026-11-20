@@ -1,7 +1,7 @@
 """Command-line entry point: `python -m app.cli --help`."""
 import argparse
 
-from app.core import milestone_1, milestone_2
+from app.core import milestone_1, milestone_2, milestone_3
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -10,6 +10,7 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("hello", help="check that everything is wired up")
     sub.add_parser("generate", help="generate the synthetic shopping basket dataset")
     sub.add_parser("train-ngram", help="train the n-gram next-item predictor")
+    sub.add_parser("train-lm", help="pretrain the small neural basket language model")
     args = parser.parse_args(argv)
     if args.command == "hello":
         print("Retail Basket Prediction Analyzer is ready. Open README.md for your milestones.")
@@ -28,6 +29,17 @@ def main(argv: list[str] | None = None) -> None:
             f"{summary['bigram_context_count']} bigram contexts, "
             f"{summary['trigram_context_count']} trigram contexts."
         )
+        print(
+            f"Sample prediction for {sample['prefix']}: {sample['item']} "
+            f"(probability {sample['probability']:.3f})."
+        )
+    elif args.command == "train-lm":
+        summary = milestone_3()
+        print(
+            f"Training loss: {summary['initial_loss']:.4f} -> "
+            f"{summary['final_loss']:.4f} over {summary['epochs']} epochs."
+        )
+        sample = summary["sample_prediction"]
         print(
             f"Sample prediction for {sample['prefix']}: {sample['item']} "
             f"(probability {sample['probability']:.3f})."
