@@ -45,9 +45,49 @@ def test_milestone_1(tmp_path):
 
 
 # Milestone 2: Implement the n-gram model to predict next items in a basket.
-@pytest.mark.skip(reason="remove this line when you start milestone 2")
-def test_milestone_2():
-    raise NotImplementedError("write the test for milestone 2")
+def test_milestone_2(tmp_path):
+    from app.core import NGramBasketPredictor, milestone_1, milestone_2
+    from app.storage import Store
+
+    store = Store(str(tmp_path / "app.json"))
+    dataset = milestone_1(num_baskets=1000, seed=13, store=store)
+    summary = milestone_2(smoothing=0.5, store=store)
+
+    serialized_model = store.get("ngram_model")
+    assert serialized_model is not None
+    predictor = NGramBasketPredictor.from_dict(serialized_model)
+    assert summary["vocab_size"] == len(dataset["vocab"])
+    assert summary["bigram_context_count"] > 0
+    assert summary["trigram_context_count"] > 0
+
+    prefix = ["<BOS>", "pasta", "marinara_sauce"]
+    probabilities = predictor.predict_proba(prefix)
+    assert set(probabilities) == set(dataset["vocab"]) - {"<PAD>", "<BOS>"}
+    assert all(probability >= 0 for probability in probabilities.values())
+    assert sum(probabilities.values()) == pytest.approx(1.0)
+    ranked_items = sorted(probabilities, key=probabilities.get, reverse=True)
+    assert "parmesan" in ranked_items[:2]
+    assert all(
+        probabilities["parmesan"] > probabilities[item]
+        for item in ("apples", "bananas", "spinach")
+    )
+    assert summary["sample_prediction"]["item"] == "parmesan"
+
+    bigram_probabilities = predictor.predict_proba(["parmesan"])
+    assert ("parmesan",) in predictor.bigram_counts
+    assert sum(bigram_probabilities.values()) == pytest.approx(1.0)
+
+    unseen_probabilities = predictor.predict_proba(
+        ["<BOS>", "never_before_seen_item"]
+    )
+    assert sum(unseen_probabilities.values()) == pytest.approx(1.0)
+    assert all(probability > 0 for probability in unseen_probabilities.values())
+
+    empty_store = Store(str(tmp_path / "generated.json"))
+    generated_summary = milestone_2(store=empty_store)
+    assert empty_store.get("dataset") is not None
+    assert empty_store.get("ngram_model") is not None
+    assert generated_summary["vocab_size"] == len(empty_store.get("dataset")["vocab"])
 
 
 # Milestone 3: Pretrain a small language model (like in the drill) on the basket sequences.
