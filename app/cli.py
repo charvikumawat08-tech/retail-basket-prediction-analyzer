@@ -1,7 +1,7 @@
 """Command-line entry point: `python -m app.cli --help`."""
 import argparse
 
-from app.core import milestone_1, milestone_2, milestone_3, milestone_4
+from app.core import milestone_1, milestone_2, milestone_3, milestone_4, milestone_5
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -12,6 +12,7 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("train-ngram", help="train the n-gram next-item predictor")
     sub.add_parser("train-lm", help="pretrain the small neural basket language model")
     sub.add_parser("evaluate", help="evaluate next-item prediction on the test baskets")
+    sub.add_parser("compare", help="present the retail analyst comparison report")
     args = parser.parse_args(argv)
     if args.command == "hello":
         print("Retail Basket Prediction Analyzer is ready. Open README.md for your milestones.")
@@ -66,6 +67,9 @@ def main(argv: list[str] | None = None) -> None:
                         f"mean rank={metrics['mean_rank']:.2f} "
                         f"(n={metrics['count']})"
                     )
+    elif args.command == "compare":
+        report = milestone_5()
+        print(report["formatted_report"])
 
 
 if __name__ == "__main__":

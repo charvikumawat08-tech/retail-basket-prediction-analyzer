@@ -168,7 +168,51 @@ def test_milestone_4(tmp_path):
 
 
 # Milestone 5: Present a comparison of the models' performance.
-@pytest.mark.skip(reason="remove this line when you start milestone 5")
-def test_milestone_5():
-    raise NotImplementedError("write the test for milestone 5")
+def test_milestone_5(tmp_path):
+    from app.core import milestone_1, milestone_4, milestone_5
+    from app.storage import Store
+
+    existing_store = Store(str(tmp_path / "existing.json"))
+    milestone_1(num_baskets=400, seed=31, store=existing_store)
+    milestone_4(store=existing_store)
+    report = milestone_5(store=existing_store)
+
+    assert set(report) >= {
+        "summary_table",
+        "spot_checks",
+        "takeaways",
+        "formatted_report",
+    }
+    assert report["summary_table"]["rows"]
+    assert "NGramBasketPredictor" in report["summary_table"]["columns"]
+    assert "SmallBasketLM" in report["summary_table"]["columns"]
+    assert {
+        row["Segment"] for row in report["summary_table"]["rows"]
+    } == {"Overall", "Planted-Itemset", "General"}
+    assert report["summary_table"]["formatted"]
+    assert "Hit@1" in report["bar_chart"]
+    assert "#" in report["bar_chart"]
+    assert len(report["spot_checks"]) >= 3
+    assert report["takeaways"]["overall_leader"]
+    assert report["takeaways"]["recommendations"]
+    assert report["takeaways"]["planted_itemset_leader"]
+    assert report["takeaways"]["general_transition_leader"]
+    assert report["formatted_report"]
+    assert "NGramBasketPredictor" in report["formatted_report"]
+    assert "SmallBasketLM" in report["formatted_report"]
+    assert "Top-1 Accuracy" in report["formatted_report"]
+    overall_ngram_top1 = existing_store.get("evaluation")["ngram"]["top1_accuracy"]
+    assert f"{overall_ngram_top1:.3f}" in report["formatted_report"]
+    assert existing_store.get("comparison_report") == report
+
+    for spot_check in report["spot_checks"]:
+        for model_name in ("NGramBasketPredictor", "SmallBasketLM"):
+            assert len(spot_check["recommendations"][model_name]) == 3
+
+    fresh_store = Store(str(tmp_path / "fresh.json"))
+    fresh_report = milestone_5(store=fresh_store)
+    assert fresh_store.get("dataset") is not None
+    assert fresh_store.get("evaluation") is not None
+    assert fresh_store.get("comparison_report") == fresh_report
+    assert "MRR" in fresh_report["formatted_report"]
 

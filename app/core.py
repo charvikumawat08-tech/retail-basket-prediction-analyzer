@@ -3,6 +3,7 @@
 from collections import Counter
 
 import numpy as np
+import pandas as pd
 
 from app.storage import Store
 
@@ -642,5 +643,192 @@ def milestone_4(store: Store | None = None) -> dict:
 
 # --- Milestone 5: Present a comparison of the models' performance.
 # Hint: Summarize your findings and present the comparison clearly, perhaps using visualizations.
-def milestone_5():  # TODO(milestone 5)
-    raise NotImplementedError("TODO(milestone 5)")
+def milestone_5(store: Store | None = None) -> dict:
+    if store is None:
+        store = Store()
+
+    required_keys = ("evaluation", "dataset", "ngram_model", "small_lm_model")
+    if any(store.get(key) is None for key in required_keys):
+        milestone_4(store=store)
+
+    evaluation = store.get("evaluation")
+    dataset = store.get("dataset")
+    ngram_data = store.get("ngram_model")
+    small_lm_data = store.get("small_lm_model")
+    if not isinstance(evaluation, dict) or not isinstance(dataset, dict):
+        raise ValueError("stored evaluation and dataset must be dictionaries")
+    if not isinstance(ngram_data, dict) or not isinstance(small_lm_data, dict):
+        raise ValueError("stored model data must be dictionaries")
+
+    planted_itemsets = dataset.get("planted_itemsets")
+    if not isinstance(planted_itemsets, list) or not planted_itemsets:
+        raise ValueError("stored dataset must include planted itemsets")
+
+    models = {
+        "NGramBasketPredictor": NGramBasketPredictor.from_dict(ngram_data),
+        "SmallBasketLM": SmallBasketLM.from_dict(small_lm_data),
+    }
+    evaluation_keys = {
+        "NGramBasketPredictor": "ngram",
+        "SmallBasketLM": "small_lm",
+    }
+    metric_labels = (
+        ("Top-1 Accuracy", "top1_accuracy"),
+        ("Top-3 Accuracy", "top3_accuracy"),
+        ("Top-5 Accuracy", "top5_accuracy"),
+        ("MRR", "mrr"),
+        ("Mean Rank", "mean_rank"),
+    )
+    segments = (
+        ("Overall", None),
+        ("Planted-Itemset", "planted_itemset"),
+        ("General", "general"),
+    )
+
+    table_rows = []
+    for segment_label, segment_key in segments:
+        for metric_label, metric_key in metric_labels:
+            row = {"Segment": segment_label, "Metric": metric_label}
+            for model_label, evaluation_key in evaluation_keys.items():
+                metrics = evaluation[evaluation_key]
+                if segment_key is not None:
+                    metrics = metrics[segment_key]
+                value = metrics[metric_key]
+                row[model_label] = None if value is None else float(value)
+            table_rows.append(row)
+
+    dataframe = pd.DataFrame(table_rows)
+    formatted_table = dataframe.to_string(
+        index=False,
+        float_format=lambda value: f"{value:.3f}",
+    )
+    summary_table = {
+        "columns": list(dataframe.columns),
+        "rows": dataframe.to_dict(orient="records"),
+        "formatted": formatted_table,
+    }
+
+    chart_lines = ["Hit-rate and MRR comparison (bar scale: 30 characters)"]
+    chart_metrics = (
+        ("Hit@1", "top1_accuracy"),
+        ("Hit@3", "top3_accuracy"),
+        ("Hit@5", "top5_accuracy"),
+        ("MRR", "mrr"),
+    )
+    for metric_label, metric_key in chart_metrics:
+        chart_lines.append(f"{metric_label}:")
+        for model_label, evaluation_key in evaluation_keys.items():
+            value = float(evaluation[evaluation_key][metric_key])
+            bar = "#" * round(value * 30)
+            chart_lines.append(f"  {model_label:<22} | {bar:<30} {value:.3f}")
+    bar_chart = "\n".join(chart_lines)
+
+    spot_checks = []
+    for itemset in planted_itemsets[:3]:
+        if len(itemset) < 2:
+            continue
+        prefix = ["<BOS>", *itemset[:-1]]
+        recommendations = {}
+        for model_label, model in models.items():
+            probabilities = model.predict_proba(prefix)
+            top_items = sorted(
+                probabilities.items(), key=lambda item: item[1], reverse=True
+            )[:3]
+            recommendations[model_label] = [
+                {"item": item, "probability": float(probability)}
+                for item, probability in top_items
+            ]
+        spot_checks.append(
+            {
+                "prefix": prefix,
+                "expected_next_item": itemset[-1],
+                "recommendations": recommendations,
+            }
+        )
+    if not spot_checks:
+        raise ValueError("stored planted itemsets must contain at least two items")
+
+    def metric_leader(metric_key: str, segment_key: str | None = None) -> str:
+        scores = {}
+        for model_label, evaluation_key in evaluation_keys.items():
+            metrics = evaluation[evaluation_key]
+            if segment_key is not None:
+                metrics = metrics[segment_key]
+            scores[model_label] = metrics[metric_key]
+        left, right = scores.values()
+        if left is None or right is None:
+            return "Insufficient data"
+        if abs(left - right) < 1e-12:
+            return "Tie"
+        if metric_key == "mean_rank":
+            return min(scores, key=scores.get)
+        return max(scores, key=scores.get)
+
+    overall_leader = metric_leader("mrr")
+    planted_leader = metric_leader("top3_accuracy", "planted_itemset")
+    general_leader = metric_leader("top3_accuracy", "general")
+    recommendations = [
+        f"Use {overall_leader} as the default ranker based on overall MRR."
+        if overall_leader not in {"Tie", "Insufficient data"}
+        else "Compare overall MRR and Hit@k before choosing a default ranker.",
+        (
+            "Consider segment-aware ranking when planted-bundle and general "
+            "transition leaders differ."
+            if planted_leader != general_leader
+            else "A single ranker can serve both segments when segment leaders agree."
+        ),
+        "Validate these synthetic-data results against real basket traffic and monitor metrics by segment.",
+    ]
+    takeaways = {
+        "overall_leader": overall_leader,
+        "overall_leader_metric": "mrr",
+        "planted_itemset_leader": planted_leader,
+        "planted_itemset_leader_metric": "top3_accuracy",
+        "general_transition_leader": general_leader,
+        "general_transition_leader_metric": "top3_accuracy",
+        "recommendations": recommendations,
+    }
+
+    spot_check_lines = []
+    for check in spot_checks:
+        spot_check_lines.append(
+            f"Prefix {check['prefix']} (expected: {check['expected_next_item']}):"
+        )
+        for model_label, items in check["recommendations"].items():
+            rendered = ", ".join(
+                f"{item['item']} ({item['probability']:.3f})" for item in items
+            )
+            spot_check_lines.append(f"  {model_label}: {rendered}")
+    takeaway_lines = [
+        f"Overall MRR leader: {overall_leader}.",
+        f"Planted-itemset Hit@3 leader: {planted_leader}.",
+        f"General-transition Hit@3 leader: {general_leader}.",
+        *[f"Recommendation: {item}" for item in recommendations],
+    ]
+    formatted_report = "\n".join(
+        [
+            "Retail Basket Model Comparison",
+            "==============================",
+            "",
+            "Side-by-side metrics",
+            formatted_table,
+            "",
+            "Terminal bar visualization",
+            bar_chart,
+            "",
+            "Qualitative spot-checks",
+            *spot_check_lines,
+            "",
+            "Analyst takeaways",
+            *takeaway_lines,
+        ]
+    )
+    report = {
+        "summary_table": summary_table,
+        "bar_chart": bar_chart,
+        "spot_checks": spot_checks,
+        "takeaways": takeaways,
+        "formatted_report": formatted_report,
+    }
+    store.put("comparison_report", report)
+    return report

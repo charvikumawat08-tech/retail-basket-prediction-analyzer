@@ -22,7 +22,7 @@ Tick these off as you go, and commit after each one.
       Hint: Adapt the language model training process from 'Teach a Language Model What Sells Together' for your basket data.
 - [x] **4. Evaluate both models using next-item prediction metrics (e.g., accuracy, rank).**
       Hint: Implement evaluation metrics similar to those discussed in 'Build a Next-Word Predictor from Scratch' for next-item prediction.
-- [ ] **5. Present a comparison of the models' performance.**  
+- [x] **5. Present a comparison of the models' performance.**
       Hint: Summarize your findings and present the comparison clearly, perhaps using visualizations.
 
 ## Run it
@@ -37,8 +37,19 @@ python -m app.cli hello
 pytest
 ```
 
+Available workflow commands:
+
+```bash
+python -m app.cli generate
+python -m app.cli train-ngram
+python -m app.cli train-lm
+python -m app.cli evaluate
+python -m app.cli compare
+```
+
 Your work goes in `app/core.py` (one stub per milestone) and `tests/test_core.py`. The first tests pass already; they
-check the plumbing.
+check the plumbing. The commands can be run in order, and `compare` runs any missing
+prerequisite milestones automatically.
 
 ## Settings and secrets
 
