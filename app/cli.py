@@ -1,7 +1,7 @@
 """Command-line entry point: `python -m app.cli --help`."""
 import argparse
 
-from app.core import milestone_1, milestone_2, milestone_3
+from app.core import milestone_1, milestone_2, milestone_3, milestone_4
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -11,6 +11,7 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("generate", help="generate the synthetic shopping basket dataset")
     sub.add_parser("train-ngram", help="train the n-gram next-item predictor")
     sub.add_parser("train-lm", help="pretrain the small neural basket language model")
+    sub.add_parser("evaluate", help="evaluate next-item prediction on the test baskets")
     args = parser.parse_args(argv)
     if args.command == "hello":
         print("Retail Basket Prediction Analyzer is ready. Open README.md for your milestones.")
@@ -44,6 +45,27 @@ def main(argv: list[str] | None = None) -> None:
             f"Sample prediction for {sample['prefix']}: {sample['item']} "
             f"(probability {sample['probability']:.3f})."
         )
+    elif args.command == "evaluate":
+        evaluation = milestone_4()
+        for model_name, results in evaluation.items():
+            print(
+                f"{model_name}: Hit@1={results['top1_accuracy']:.3f}, "
+                f"Hit@3={results['top3_accuracy']:.3f}, "
+                f"Hit@5={results['top5_accuracy']:.3f}, "
+                f"MRR={results['mrr']:.3f}, "
+                f"mean rank={results['mean_rank']:.2f}"
+            )
+            for segment in ("planted_itemset", "general"):
+                metrics = results[segment]
+                if metrics["count"]:
+                    print(
+                        f"  {segment}: Hit@1={metrics['top1_accuracy']:.3f}, "
+                        f"Hit@3={metrics['top3_accuracy']:.3f}, "
+                        f"Hit@5={metrics['top5_accuracy']:.3f}, "
+                        f"MRR={metrics['mrr']:.3f}, "
+                        f"mean rank={metrics['mean_rank']:.2f} "
+                        f"(n={metrics['count']})"
+                    )
 
 
 if __name__ == "__main__":

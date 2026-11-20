@@ -534,10 +534,110 @@ def milestone_3(
     }
 
 
+def evaluate_predictor(
+    predictor: NGramBasketPredictor | SmallBasketLM,
+    baskets: list[list[str]],
+    planted_itemsets: list[list[str]],
+) -> dict:
+    planted_pairs = {
+        pair
+        for itemset in planted_itemsets
+        for pair in zip(itemset, itemset[1:])
+    }
+    ranks = {"overall": [], "planted_itemset": [], "general": []}
+
+    for basket in baskets:
+        for target_index in range(1, len(basket)):
+            target = basket[target_index]
+            if target in {"<PAD>", "<BOS>"}:
+                continue
+
+            probabilities = predictor.predict_proba(basket[:target_index])
+            if target not in probabilities:
+                raise ValueError(f"target item {target!r} is not in model vocabulary")
+            ranked_items = sorted(
+                probabilities, key=lambda item: probabilities[item], reverse=True
+            )
+            target_rank = ranked_items.index(target) + 1
+            ranks["overall"].append(target_rank)
+            segment = (
+                "planted_itemset"
+                if (basket[target_index - 1], target) in planted_pairs
+                else "general"
+            )
+            ranks[segment].append(target_rank)
+
+    if not ranks["overall"]:
+        raise ValueError("test baskets contain no next-item transitions")
+
+    def summarize_ranks(segment_ranks: list[int]) -> dict:
+        if not segment_ranks:
+            return {
+                "top1_accuracy": None,
+                "top3_accuracy": None,
+                "top5_accuracy": None,
+                "mrr": None,
+                "mean_rank": None,
+                "count": 0,
+            }
+        count = len(segment_ranks)
+        return {
+            "top1_accuracy": sum(rank == 1 for rank in segment_ranks) / count,
+            "top3_accuracy": sum(rank <= 3 for rank in segment_ranks) / count,
+            "top5_accuracy": sum(rank <= 5 for rank in segment_ranks) / count,
+            "mrr": sum(1 / rank for rank in segment_ranks) / count,
+            "mean_rank": sum(segment_ranks) / count,
+            "count": count,
+        }
+
+    return {
+        **summarize_ranks(ranks["overall"]),
+        "planted_itemset": summarize_ranks(ranks["planted_itemset"]),
+        "general": summarize_ranks(ranks["general"]),
+    }
+
+
 # --- Milestone 4: Evaluate both models using next-item prediction metrics (e.g., accuracy, rank).
 # Hint: Implement evaluation metrics similar to those discussed in 'Build a Next-Word Predictor from Scratch' for next-item prediction.
-def milestone_4():  # TODO(milestone 4)
-    raise NotImplementedError("TODO(milestone 4)")
+def milestone_4(store: Store | None = None) -> dict:
+    if store is None:
+        store = Store()
+
+    dataset = store.get("dataset")
+    if dataset is None:
+        dataset = milestone_1(store=store)
+    if not isinstance(dataset, dict):
+        raise ValueError("stored dataset must be a dictionary")
+
+    test_baskets = dataset.get("test_baskets")
+    planted_itemsets = dataset.get("planted_itemsets")
+    if not isinstance(test_baskets, list) or not isinstance(planted_itemsets, list):
+        raise ValueError("stored dataset must include test_baskets and planted_itemsets")
+
+    if store.get("ngram_model") is None:
+        milestone_2(store=store)
+    if store.get("small_lm_model") is None:
+        milestone_3(store=store)
+
+    ngram_data = store.get("ngram_model")
+    small_lm_data = store.get("small_lm_model")
+    if not isinstance(ngram_data, dict) or not isinstance(small_lm_data, dict):
+        raise ValueError("stored model data must be dictionaries")
+
+    evaluation = {
+        "ngram": evaluate_predictor(
+            NGramBasketPredictor.from_dict(ngram_data),
+            test_baskets,
+            planted_itemsets,
+        ),
+        "small_lm": evaluate_predictor(
+            SmallBasketLM.from_dict(small_lm_data),
+            test_baskets,
+            planted_itemsets,
+        ),
+    }
+    store.put("evaluation", evaluation)
+    return evaluation
 
 
 # --- Milestone 5: Present a comparison of the models' performance.

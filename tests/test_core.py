@@ -126,9 +126,45 @@ def test_milestone_3(tmp_path):
 
 
 # Milestone 4: Evaluate both models using next-item prediction metrics (e.g., accuracy, rank).
-@pytest.mark.skip(reason="remove this line when you start milestone 4")
-def test_milestone_4():
-    raise NotImplementedError("write the test for milestone 4")
+def test_milestone_4(tmp_path):
+    from app.core import milestone_4
+    from app.storage import Store
+
+    store = Store(str(tmp_path / "app.json"))
+    evaluation = milestone_4(store=store)
+
+    assert store.get("dataset") is not None
+    assert store.get("ngram_model") is not None
+    assert store.get("small_lm_model") is not None
+    assert store.get("evaluation") == evaluation
+
+    for model_name in ("ngram", "small_lm"):
+        results = evaluation[model_name]
+        for metric in (
+            "top1_accuracy",
+            "top3_accuracy",
+            "top5_accuracy",
+            "mrr",
+        ):
+            assert 0.0 <= results[metric] <= 1.0
+        assert results["top1_accuracy"] <= results["top3_accuracy"]
+        assert results["top3_accuracy"] <= results["top5_accuracy"]
+        assert results["mean_rank"] >= 1.0
+
+        for segment in ("planted_itemset", "general"):
+            metrics = results[segment]
+            assert metrics["count"] > 0
+            for metric in (
+                "top1_accuracy",
+                "top3_accuracy",
+                "top5_accuracy",
+                "mrr",
+            ):
+                assert 0.0 <= metrics[metric] <= 1.0
+            assert metrics["top1_accuracy"] <= metrics["top3_accuracy"]
+            assert metrics["top3_accuracy"] <= metrics["top5_accuracy"]
+            assert metrics["mean_rank"] >= 1.0
+        assert results["planted_itemset"]["top3_accuracy"] > 0.5
 
 
 # Milestone 5: Present a comparison of the models' performance.

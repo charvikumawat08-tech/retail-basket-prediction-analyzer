@@ -20,7 +20,7 @@ Tick these off as you go, and commit after each one.
       Hint: Apply the n-gram model building technique from 'Build a Next-Word Predictor from Scratch' to your basket sequences.
 - [x] **3. Pretrain a small language model (like in the drill) on the basket sequences.**
       Hint: Adapt the language model training process from 'Teach a Language Model What Sells Together' for your basket data.
-- [ ] **4. Evaluate both models using next-item prediction metrics (e.g., accuracy, rank).**  
+- [x] **4. Evaluate both models using next-item prediction metrics (e.g., accuracy, rank).**
       Hint: Implement evaluation metrics similar to those discussed in 'Build a Next-Word Predictor from Scratch' for next-item prediction.
 - [ ] **5. Present a comparison of the models' performance.**  
       Hint: Summarize your findings and present the comparison clearly, perhaps using visualizations.
